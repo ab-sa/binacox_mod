@@ -161,65 +161,24 @@ def fit_and_score(features, features_bin, times, censoring,
     Y_train, Y_test = times[idx_train], times[idx_test]
     delta_train, delta_test = censoring[idx_train], censoring[idx_test]
 
-    learner = CoxRegression(penalty='binarsity', tol=1e-5,
+    learner = CoxRegression(tol=1e-5,
                             verbose=False, max_iter=100, step=0.3,
                             blocks_start=blocks_start,
                             blocks_length=blocks_length,
-                            warm_start=True)
-    learner._solver_obj.linesearch = False
-    learner.C = C
+                            warm_start=True, C=C)
     learner.fit(X_train, Y_train, delta_train)
-    coeffs = learner.coeffs
-
-    cut_points_estimates = {}
-    for j, start in enumerate(blocks_start):
-        coeffs_j = coeffs[start:start + blocks_length[j]]
-        all_zeros = not np.any(coeffs_j)
-        if all_zeros:
-            cut_points_estimate_j = np.array([-np.inf, np.inf])
-        else:
-            groups_j = get_groups(coeffs_j)
-            jump_j = np.where(groups_j[1:] - groups_j[:-1] != 0)[0] + 1
-            if jump_j.size == 0:
-                cut_points_estimate_j = np.array([-np.inf, np.inf])
-            else:
-                cut_points_estimate_j = boundaries[features_names[j]][
-                    jump_j]
-                if cut_points_estimate_j[0] != -np.inf:
-                    cut_points_estimate_j = np.insert(cut_points_estimate_j,
-                                                      0, -np.inf)
-                if cut_points_estimate_j[-1] != np.inf:
-                    cut_points_estimate_j = np.append(cut_points_estimate_j,
-                                                      np.inf)
-        cut_points_estimates[features_names[j]] = cut_points_estimate_j
-    binarizer = FeaturesBinarizer(method='given',
-                                  bins_boundaries=cut_points_estimates)
-    binarized_features = binarizer.fit_transform(features)
-    blocks_start = binarizer.blocks_start
-    blocks_length = binarizer.blocks_length
-    X_bin_train = binarized_features[idx_train]
-    X_bin_test = binarized_features[idx_test]
-    learner_ = CoxRegression(penalty='binarsity', tol=1e-5,
-                             verbose=False, max_iter=100, step=0.3,
-                             blocks_start=blocks_start,
-                             blocks_length=blocks_length,
-                             warm_start=True, C=1e10)
-    learner_._solver_obj.linesearch = False
-    learner_.fit(X_bin_train, Y_train, delta_train)
-    score = learner_.score(X_bin_test, Y_test, delta_test)
+    score = learner.score(X_test, Y_test, delta_test)
 
     if validation_data is not None:
         X_validation = validation_data[0]
-        X_bin_validation = binarizer.fit_transform(X_validation)
+        X_bin_validation = custom_binarizer(X_validation, n_bins=len(boundaries))['X_bin']
         Y_validation = validation_data[1]
         delta_validation = validation_data[2]
-        score_validation = learner_.score(X_bin_validation, Y_validation,
-                                          delta_validation)
+        score_validation = learner.score(X_bin_validation, Y_validation, delta_validation)
     else:
         score_validation = None
 
     return score, score_validation
-
 
 
 
