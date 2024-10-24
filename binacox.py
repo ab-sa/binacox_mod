@@ -4,14 +4,36 @@ import scipy
 from scipy.stats import norm
 from sklearn.model_selection import KFold
 from joblib import Parallel, delayed
-from tick.preprocessing.features_binarizer import FeaturesBinarizer
-from tick.survival import CoxRegression
+#from tick.preprocessing.features_binarizer import FeaturesBinarizer
+#from tick.survival import CoxRegression
 from lifelines.utils import concordance_index
 import statsmodels.api as sm
 import pylab as pl
 import warnings
 warnings.filterwarnings('ignore')
 
+from sklearn.preprocessing import Binarizer, OneHotEncoder
+def FeaturesBinarizer(X):
+    binarizer = Binarizer()
+    X_binarized = binarizer.fit_transform(X)
+    return X_binarized
+
+from lifelines import CoxPHFitter
+def CoxRegression(df, duration_col='time', event_col='event'):
+    cox_model = CoxPHFitter()
+    cox_model.fit(df, duration_col=duration_col, event_col=event_col)
+    return cox_model
+def SimuCoxRegWithCutPoints(n_samples):
+    np.random.seed(42)
+    # Simulate features and survival times
+    X = np.random.randn(n_samples, 5)
+    durations = np.random.exponential(scale=10, size=n_samples)
+    events = np.random.binomial(1, 0.5, size=n_samples)
+
+    df = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
+    df['time'] = durations
+    df['event'] = events
+    return df
 
 def compute_score(features, features_binarized, times, censoring,
                   blocks_start, blocks_length, boundaries, C=10, n_folds=10,
