@@ -5,13 +5,37 @@ import pandas as pd
 import numpy as np
 from sys import stdout, argv
 from time import time
-from tick.preprocessing.features_binarizer import FeaturesBinarizer
-from tick.survival import CoxRegression, SimuCoxRegWithCutPoints
+#from tick.preprocessing.features_binarizer import FeaturesBinarizer
+#from tick.survival import CoxRegression, SimuCoxRegWithCutPoints
 from binacox import compute_score, multiple_testing, get_groups, p_value_cut
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import COMMASPACE
+
+from sklearn.preprocessing import Binarizer, OneHotEncoder
+def FeaturesBinarizer(X):
+    binarizer = Binarizer()
+    X_binarized = binarizer.fit_transform(X)
+    return X_binarized
+
+from lifelines import CoxPHFitter
+def CoxRegression(df, duration_col='time', event_col='event'):
+    cox_model = CoxPHFitter()
+    cox_model.fit(df, duration_col=duration_col, event_col=event_col)
+    return cox_model
+def SimuCoxRegWithCutPoints(n_samples):
+    np.random.seed(42)
+    # Simulate features and survival times
+    X = np.random.randn(n_samples, 5)
+    durations = np.random.exponential(scale=10, size=n_samples)
+    events = np.random.binomial(1, 0.5, size=n_samples)
+
+    df = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
+    df['time'] = durations
+    df['event'] = events
+    return df
+
 
 n_features = int(argv[1])
 n_cut_points = int(argv[2])
