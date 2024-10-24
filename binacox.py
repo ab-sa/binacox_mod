@@ -12,28 +12,143 @@ import pylab as pl
 import warnings
 warnings.filterwarnings('ignore')
 
-from sklearn.preprocessing import Binarizer, OneHotEncoder
-def FeaturesBinarizer(X):
-    binarizer = Binarizer()
-    X_binarized = binarizer.fit_transform(X)
-    return X_binarized
 
+from sklearn.preprocessing import OneHotEncoder, KBinsDiscretizer
 from lifelines import CoxPHFitter
-def CoxRegression(df, duration_col='time', event_col='event'):
-    cox_model = CoxPHFitter()
-    cox_model.fit(df, duration_col=duration_col, event_col=event_col)
-    return cox_model
-def SimuCoxRegWithCutPoints(n_samples):
-    np.random.seed(42)
-    # Simulate features and survival times
-    X = np.random.randn(n_samples, 5)
-    durations = np.random.exponential(scale=10, size=n_samples)
-    events = np.random.binomial(1, 0.5, size=n_samples)
+import numpy as np
+import scipy.stats as stats
 
-    df = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
-    df['time'] = durations
-    df['event'] = events
-    return df
+# Custom implementation for SimuCoxRegWithCutPoints
+# This function simulates covariates and survival times for a Cox proportional hazards model
+
+def simu_cox_reg_with_cutpoints(n_samples=100, n_features=10, cutpoints=None, seed=None):
+    if seed is not None:
+        np.random.seed(seed)
+    
+    # Generate covariates (features)
+    X = np.random.randn(n_samples, n_features)
+    
+    # Apply cutpoints if provided
+    if cutpoints is not None:
+        for feature_idx, cutpoint in cutpoints.items():
+            X[:, feature_idx] = np.where(X[:, feature_idx] > cutpoint, 1, 0)
+    
+    # Generate baseline hazard and survival times
+    baseline_hazard = 0.01  # Assume a constant baseline hazard for simplicity
+    linear_predictor = np.dot(X, np.random.uniform(-1, 1, n_features))
+    hazard = baseline_hazard * np.exp(linear_predictor)
+    
+    # Generate survival times using an exponential distribution
+    survival_times = np.random.exponential(1 / hazard)
+    
+    # Generate censoring times and apply censoring
+    censoring_times = np.random.uniform(0, np.max(survival_times), n_samples)
+    observed_times = np.minimum(survival_times, censoring_times)
+    event_observed = survival_times <= censoring_times
+    
+    return X, observed_times, event_observed
+
+def custom_binarizer(X, n_bins=50, strategy='uniform'):
+    # Step 1: Discretize the features using KBinsDiscretizer
+    binarizer = KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy=strategy)
+    X_binned = binarizer.fit_transform(X)
+    
+    # Step 2: One-hot encode the binned features
+    one_hot_encoder = OneHotEncoder(sparse_output=False)
+    X_bin = one_hot_encoder.fit_transform(X_binned)
+    
+    # Step 3: Extract bin boundaries
+    bins_boundaries = binarizer.bin_edges_
+    
+    # Step 4: Create mapper and feature_type (assuming all features are continuous for simplicity)
+    mapper = {i: list(range(len(one_hot_encoder.categories_[i]))) for i in range(len(one_hot_encoder.categories_))}
+    feature_type = {i: 'continuous' for i in range(X.shape[1])}
+    
+    # Step 5: Calculate blocks_start and blocks_length
+    blocks_start = [0]
+    blocks_length = []
+    for i in range(len(one_hot_encoder.categories_)):
+        length = len(one_hot_encoder.categories_[i])
+        blocks_length.append(length)
+        if i > 0:
+            blocks_start.append(blocks_start[-1] + blocks_length[-2])
+    
+    return {
+        'X_bin': X_bin,
+        'one_hot_encoder': one_hot_encoder,
+        'boundaries': bins_boundaries,
+        'mapper': mapper,
+        'feature_type': feature_type,
+        'blocks_start': blocks_start,
+        'blocks_length': blocks_length
+    }
+
+
+# Custom implementation for ProxBinarsity
+# This class applies total-variation regularization followed by centering within sub-blocks
+def prox_binarsity(beta, strength, blocks_start, blocks_length, positive=False):
+    n_blocks = len(blocks_start)
+    new_beta = beta.copy()
+    for i in range(n_blocks):
+        start = blocks_start[i]
+        length = blocks_length[i]
+        block = beta[start:start + length]
+        # Apply total variation denoising (TV regularization)
+        block_diff = np.diff(block)
+        tv_penalty = strength * np.sign(block_diff)
+        block[:-1] -= tv_penalty
+        # Centering within sub-blocks
+        block_mean = np.mean(block)
+        block -= block_mean
+        # Ensure non-negative entries if positive=True
+        if positive:
+            block = np.maximum(block, 0)
+        new_beta[start:start + length] = block
+    return new_beta
+
+# Update any instances of functions and classes from tick to use the new library imports.
+# Ensure that the inputs/outputs of the replacement functions are compatible with the rest of the binacox code.
+
+# Step 3: Modify binacox code according to the alternatives
+# Modify the relevant functions in binacox to use KBinsDiscretizer, CoxPHFitter, or other suitable alternatives.
+# Make sure to adjust the code where these classes or functions are used, such as data preprocessing, model fitting, or simulation.
+
+# Custom Cox regression with binarsity penalty
+class CoxRegression:
+    def __init__(self, penalty='binarsity', tol=1e-5, verbose=False, max_iter=100, step=0.3,
+                 blocks_start=None, blocks_length=None, warm_start=True):
+        self.penalty = penalty
+        self.tol = tol
+        self.verbose = verbose
+        self.max_iter = max_iter
+        self.step = step
+        self.blocks_start = blocks_start
+        self.blocks_length = blocks_length
+        self.warm_start = warm_start
+        self.beta = None
+
+    def fit(self, X, Y, delta):
+        # Initialize coefficients
+        n_features = X.shape[1]
+        self.beta = np.zeros(n_features)
+        for iteration in range(self.max_iter):
+            # Compute gradient of the negative log partial likelihood
+            risk_scores = np.exp(np.dot(X, self.beta))
+            partial_likelihood_gradient = -np.dot(X.T, delta - (risk_scores / np.sum(risk_scores)))
+            # Apply proximal operator if penalty is 'binarsity'
+            if self.penalty == 'binarsity':
+                self.beta -= self.step * partial_likelihood_gradient
+                self.beta = prox_binarsity(self.beta, self.step, self.blocks_start, self.blocks_length)
+            else:
+                self.beta -= self.step * partial_likelihood_gradient
+            # Check for convergence
+            if np.linalg.norm(partial_likelihood_gradient) < self.tol:
+                if self.verbose:
+                    print(f'Convergence reached at iteration {iteration}')
+                break
+
+
+
 
 def compute_score(features, features_binarized, times, censoring,
                   blocks_start, blocks_length, boundaries, C=10, n_folds=10,
