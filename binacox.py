@@ -113,10 +113,9 @@ def prox_binarsity(beta, strength, blocks_start, blocks_length, positive=False):
 # Modify the relevant functions in binacox to use KBinsDiscretizer, CoxPHFitter, or other suitable alternatives.
 # Make sure to adjust the code where these classes or functions are used, such as data preprocessing, model fitting, or simulation.
 
-# Custom Cox regression with binarsity penalty
 class CoxRegression:
     def __init__(self, penalty='binarsity', tol=1e-5, verbose=False, max_iter=100, step=0.3,
-                 blocks_start=None, blocks_length=None, warm_start=True):
+                 blocks_start=None, blocks_length=None, warm_start=True, C=1e10):
         self.penalty = penalty
         self.tol = tol
         self.verbose = verbose
@@ -125,6 +124,7 @@ class CoxRegression:
         self.blocks_start = blocks_start
         self.blocks_length = blocks_length
         self.warm_start = warm_start
+        self.C = C
         self.beta = None
 
     def fit(self, X, Y, delta):
@@ -147,50 +147,13 @@ class CoxRegression:
                     print(f'Convergence reached at iteration {iteration}')
                 break
 
+    def score(self, X, Y, delta):
+        # Compute the concordance index as a performance metric
+        from lifelines.utils import concordance_index
+        risk_scores = np.dot(X, self.beta)
+        return concordance_index(Y, -risk_scores, delta)
 
-
-
-def compute_score(features, features_binarized, times, censoring,
-                  blocks_start, blocks_length, boundaries, C=10, n_folds=10,
-                  features_names=None, shuffle=True, n_jobs=1, verbose=False,
-                  validation_data=None):
-    scores = cross_val_score(features, features_binarized, times,
-                             censoring, blocks_start, blocks_length, boundaries,
-                             n_folds=n_folds, shuffle=shuffle, C=C,
-                             features_names=features_names, n_jobs=n_jobs,
-                             verbose=verbose, validation_data=validation_data)
-    scores_test = scores[:, 0]
-    scores_validation = scores[:, 1]
-    if validation_data is not None:
-        scores_validation_mean = scores_validation.mean()
-        scores_validation_std = scores_validation.std()
-    else:
-        scores_validation_mean, scores_validation_std = None, None
-
-    scores_mean = scores_test.mean()
-    scores_std = scores_test.std()
-    if verbose:
-        print("\nscore %0.3f (+/- %0.3f)" % (scores_mean, scores_std))
-    scores = [scores_mean, scores_std, scores_validation_mean,
-              scores_validation_std]
-    return scores
-
-
-def cross_val_score(features, features_binarized, times, censoring,
-                    blocks_start, blocks_length, boundaries, n_folds, shuffle,
-                    C, features_names, n_jobs, verbose, validation_data):
-    cv = KFold(n_splits=n_folds, shuffle=shuffle)
-    cv_iter = list(cv.split(features))
-
-    parallel = Parallel(n_jobs=n_jobs, verbose=verbose)
-    scores = parallel(
-        delayed(fit_and_score)(features, features_binarized, times,
-                               censoring, blocks_start, blocks_length,
-                               boundaries, features_names, idx_train, idx_test,
-                               validation_data, C)
-        for (idx_train, idx_test) in cv_iter)
-    return np.array(scores)
-
+# Update the fit_and_score function to use the updated CoxRegression class
 
 def fit_and_score(features, features_bin, times, censoring,
                   blocks_start, blocks_length, boundaries, features_names,
@@ -259,6 +222,119 @@ def fit_and_score(features, features_bin, times, censoring,
         score_validation = None
 
     return score, score_validation
+
+
+
+
+def compute_score(features, features_binarized, times, censoring,
+                  blocks_start, blocks_length, boundaries, C=10, n_folds=10,
+                  features_names=None, shuffle=True, n_jobs=1, verbose=False,
+                  validation_data=None):
+    scores = cross_val_score(features, features_binarized, times,
+                             censoring, blocks_start, blocks_length, boundaries,
+                             n_folds=n_folds, shuffle=shuffle, C=C,
+                             features_names=features_names, n_jobs=n_jobs,
+                             verbose=verbose, validation_data=validation_data)
+    scores_test = scores[:, 0]
+    scores_validation = scores[:, 1]
+    if validation_data is not None:
+        scores_validation_mean = scores_validation.mean()
+        scores_validation_std = scores_validation.std()
+    else:
+        scores_validation_mean, scores_validation_std = None, None
+
+    scores_mean = scores_test.mean()
+    scores_std = scores_test.std()
+    if verbose:
+        print("\nscore %0.3f (+/- %0.3f)" % (scores_mean, scores_std))
+    scores = [scores_mean, scores_std, scores_validation_mean,
+              scores_validation_std]
+    return scores
+
+
+def cross_val_score(features, features_binarized, times, censoring,
+                    blocks_start, blocks_length, boundaries, n_folds, shuffle,
+                    C, features_names, n_jobs, verbose, validation_data):
+    cv = KFold(n_splits=n_folds, shuffle=shuffle)
+    cv_iter = list(cv.split(features))
+
+    parallel = Parallel(n_jobs=n_jobs, verbose=verbose)
+    scores = parallel(
+        delayed(fit_and_score)(features, features_binarized, times,
+                               censoring, blocks_start, blocks_length,
+                               boundaries, features_names, idx_train, idx_test,
+                               validation_data, C)
+        for (idx_train, idx_test) in cv_iter)
+    return np.array(scores)
+
+
+# def fit_and_score(features, features_bin, times, censoring,
+#                   blocks_start, blocks_length, boundaries, features_names,
+#                   idx_train, idx_test, validation_data, C):
+    # if features_names is None:
+    #     features_names = [str(j) for j in range(features.shape[1])]
+    # X_train, X_test = features_bin[idx_train], features_bin[idx_test]
+    # Y_train, Y_test = times[idx_train], times[idx_test]
+    # delta_train, delta_test = censoring[idx_train], censoring[idx_test]
+
+    # learner = CoxRegression(penalty='binarsity', tol=1e-5,
+    #                         verbose=False, max_iter=100, step=0.3,
+    #                         blocks_start=blocks_start,
+    #                         blocks_length=blocks_length,
+    #                         warm_start=True)
+    # learner._solver_obj.linesearch = False
+    # learner.C = C
+    # learner.fit(X_train, Y_train, delta_train)
+    # coeffs = learner.coeffs
+
+    # cut_points_estimates = {}
+    # for j, start in enumerate(blocks_start):
+    #     coeffs_j = coeffs[start:start + blocks_length[j]]
+    #     all_zeros = not np.any(coeffs_j)
+    #     if all_zeros:
+    #         cut_points_estimate_j = np.array([-np.inf, np.inf])
+    #     else:
+    #         groups_j = get_groups(coeffs_j)
+    #         jump_j = np.where(groups_j[1:] - groups_j[:-1] != 0)[0] + 1
+    #         if jump_j.size == 0:
+    #             cut_points_estimate_j = np.array([-np.inf, np.inf])
+    #         else:
+    #             cut_points_estimate_j = boundaries[features_names[j]][
+    #                 jump_j]
+    #             if cut_points_estimate_j[0] != -np.inf:
+    #                 cut_points_estimate_j = np.insert(cut_points_estimate_j,
+    #                                                   0, -np.inf)
+    #             if cut_points_estimate_j[-1] != np.inf:
+    #                 cut_points_estimate_j = np.append(cut_points_estimate_j,
+    #                                                   np.inf)
+    #     cut_points_estimates[features_names[j]] = cut_points_estimate_j
+    # binarizer = FeaturesBinarizer(method='given',
+    #                               bins_boundaries=cut_points_estimates)
+    # binarized_features = binarizer.fit_transform(features)
+    # blocks_start = binarizer.blocks_start
+    # blocks_length = binarizer.blocks_length
+    # X_bin_train = binarized_features[idx_train]
+    # X_bin_test = binarized_features[idx_test]
+    # learner_ = CoxRegression(penalty='binarsity', tol=1e-5,
+    #                          verbose=False, max_iter=100, step=0.3,
+    #                          blocks_start=blocks_start,
+    #                          blocks_length=blocks_length,
+    #                          warm_start=True, C=1e10)
+    # learner_._solver_obj.linesearch = False
+    # learner_.fit(X_bin_train, Y_train, delta_train)
+    # score = learner_.score(X_bin_test, Y_test, delta_test)
+
+    # if validation_data is not None:
+    #     X_validation = validation_data[0]
+    #     X_bin_validation = binarizer.fit_transform(X_validation)
+    #     Y_validation = validation_data[1]
+    #     delta_validation = validation_data[2]
+    #     score_validation = learner_.score(X_bin_validation, Y_validation,
+    #                                       delta_validation)
+    # else:
+    #     score_validation = None
+
+    # return score, score_validation
 
 
 def get_groups(coeffs):
