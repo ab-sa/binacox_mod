@@ -114,9 +114,8 @@ def prox_binarsity(beta, strength, blocks_start, blocks_length, positive=False):
 # Make sure to adjust the code where these classes or functions are used, such as data preprocessing, model fitting, or simulation.
 
 class CoxRegression:
-    def __init__(self, penalty='binarsity', tol=1e-5, verbose=False, max_iter=100, step=0.3,
+    def __init__(self, tol=1e-5, verbose=False, max_iter=100, step=0.3,
                  blocks_start=None, blocks_length=None, warm_start=True, C=1e10):
-        self.penalty = penalty
         self.tol = tol
         self.verbose = verbose
         self.max_iter = max_iter
@@ -135,12 +134,9 @@ class CoxRegression:
             # Compute gradient of the negative log partial likelihood
             risk_scores = np.exp(np.dot(X, self.beta))
             partial_likelihood_gradient = -np.dot(X.T, delta - (risk_scores / np.sum(risk_scores)))
-            # Apply proximal operator if penalty is 'binarsity'
-            if self.penalty == 'binarsity':
-                self.beta -= self.step * partial_likelihood_gradient
-                self.beta = prox_binarsity(self.beta, self.step, self.blocks_start, self.blocks_length)
-            else:
-                self.beta -= self.step * partial_likelihood_gradient
+            # Apply proximal operator if 'binarsity' penalty is being used
+            self.beta -= self.step * partial_likelihood_gradient
+            self.beta = prox_binarsity(self.beta, self.step, self.blocks_start, self.blocks_length)
             # Check for convergence
             if np.linalg.norm(partial_likelihood_gradient) < self.tol:
                 if self.verbose:
@@ -152,6 +148,7 @@ class CoxRegression:
         from lifelines.utils import concordance_index
         risk_scores = np.dot(X, self.beta)
         return concordance_index(Y, -risk_scores, delta)
+
 
 # Update the fit_and_score function to use the updated CoxRegression class
 
