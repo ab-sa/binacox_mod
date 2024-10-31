@@ -5,6 +5,29 @@ library(glmnet)
 
 n_bins <- 30
 
+
+folder_path <- "./"
+
+# Create a list of all file paths with the specified pattern (simData_001.csv to simData_100.csv)
+file_list <- list.files(path = folder_path, pattern = "simData_\\d{3}\\.csv", full.names = TRUE)
+
+
+m1_metric_num = NULL
+AIC_metric = NULL
+procss_time = NULL
+
+m1_metric_Bussy = NULL
+AIC_metric_Bussy = NULL
+procss_time_Bussy = NULL
+
+
+
+for (file in file_list){
+
+start_time <- Sys.time()  
+
+simData <- read.csv(file)
+
 weights_gen <-
   function(data = simData,
            n_feats = 2,
@@ -19,7 +42,7 @@ weights_gen <-
       w[j , ] <- 11.32 * sqrt((c + log(n_feats + d) + l_c_n[j , ]) / (nrow(data)) * V[j , ]) +
         18.62 * (c + 1 + log(n_feats + d) + l_c_n[j , ]) / (nrow(data))
     }
-    
+
     return(w)
   }
 
@@ -40,8 +63,6 @@ m1_metric <-
     return(mean(m1))
   }
 
-simData <- read.csv("binacox/simData_1000.csv")[ , -1]
-
 
 for (i in 1 : n_bins) {
   simData %<>%
@@ -56,6 +77,7 @@ for (i in 1 : n_bins) {
     colnames(simData)[colnames(simData) == "temp2"] <- paste0("X2_bin_", i)
   }
 }
+
 simData_mod <-
   simData %>%
   dplyr::select(Y, delta) %>%
@@ -67,7 +89,6 @@ weights_simData <-
               n_feats = 2,
               n_bins = n_bins,
               c = 10)
-weights_simData[1, ]
 
 
 
@@ -86,22 +107,22 @@ names(glm_cox_bussy$beta[ , 1][glm_cox_bussy$beta[, 1] != 0])
 glm_cv <- cv.glmnet(x = X_mat, y = Surv(simData_mod$Y,
                                         simData_mod$delta),
                     family = "cox")
-glm_cv$lambda.1se
-plot(glm_cv)
+# glm_cv$lambda.1se
+# plot(glm_cv)
 glm_cox <- glmnet(x = X_mat, y = Surv(simData_mod$Y, simData_mod$delta),
                       family = "cox", lambda = glm_cv$lambda.1se * 3.5)
-names(glm_cox$beta[ , 1][glm_cox$beta[, 1] != 0])
+# names(glm_cox$beta[ , 1][glm_cox$beta[, 1] != 0])
 
 X1_cuts <- quantile(simData$X1, probs = c(11, 23) / (n_bins + 1))
 X2_cuts <- quantile(simData$X2, probs = c(9, 23) / (n_bins + 1))
 
-m1_metric(c_true = matrix(c(-0.38828854, 0.57771615, -0.61267879, 0.60985693), ncol = 2),
+m1_metric_our_model <- m1_metric(c_true = matrix(c(-0.38828854, 0.57771615, -0.61267879, 0.60985693), ncol = 2),
           c_est = matrix(c(quantile(simData$X1, probs = c(11, 23) / (n_bins + 1)),
                            quantile(simData$X2, probs = c(9, 23) / (n_bins + 1))), ncol = 2))
 
 X1_cuts_bussy <- c(-0.37379203, 0.58799982)
 X2_cuts_bussy <- c(-0.61961702, 0.6224972)
-m1_metric(c_true = matrix(c(-0.38828854, 0.57771615, -0.61267879, 0.60985693), ncol = 2),
+m1_metric_Bussy_model <- m1_metric(c_true = matrix(c(-0.38828854, 0.57771615, -0.61267879, 0.60985693), ncol = 2),
           c_est = matrix(c(X1_cuts_bussy, X2_cuts_bussy), ncol = 2))
 
 
@@ -111,7 +132,7 @@ simData %>%
                                 ifelse(X1 <= 0.57771615, 1, 2))),
          X2_bin = factor(ifelse(X2 <= -0.61267879, 0,
                                 ifelse(X2 <= 0.60985693, 1, 2)))) %>%
-  coxph(Surv(Y, delta) ~ X1_bin + X2_bin, data = .) %>% AIC
+  coxph(Surv(Y, delta) ~ X1_bin + X2_bin, data = .) %>% AIC -> AIC_true
   
 # our cuts
 simData %>%
@@ -119,7 +140,7 @@ simData %>%
                                 ifelse(X1 <= X1_cuts[2], 1, 2))),
          X2_bin = factor(ifelse(X2 <= X2_cuts[1], 0,
                                 ifelse(X2 <= X2_cuts[2], 1, 2)))) %>%
-  coxph(Surv(Y, delta) ~ X1_bin + X2_bin, data = .) %>% AIC
+  coxph(Surv(Y, delta) ~ X1_bin + X2_bin, data = .) %>% AIC -> AIC_our_model
 
 # Bussy's cuts
 simData %>%
@@ -127,7 +148,15 @@ simData %>%
                                 ifelse(X1 <= X1_cuts_bussy[2], 1, 2))),
          X2_bin = factor(ifelse(X2 <= X2_cuts_bussy[1], 0,
                                 ifelse(X2 <= X2_cuts_bussy[2], 1, 2)))) %>%
-  coxph(Surv(Y, delta) ~ X1_bin + X2_bin, data = .) %>% AIC
+  coxph(Surv(Y, delta) ~ X1_bin + X2_bin, data = .) %>% AIC -> AIC_Bussy
 
+
+m1_metric_num <- c(m1_metric_our_model, m1_metric_num)
+AIC_metric <- c(AIC_our_model, AIC_metric)
+procss_time <- c(procss_time, as.numeric(Sys.time()-start_time))
+
+m1_metric_Bussy <- c(m1_metric_Bussy, m1_metric_num)
+AIC_metric_Bussy <- c(AIC_Bussy, AIC_metric_Bussy)
+}
 
 
